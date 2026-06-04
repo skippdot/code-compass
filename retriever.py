@@ -200,7 +200,9 @@ class Retriever:
         extra: list[dict] = []
         for h in pool_rows[:expand_from]:
             hname = (h.get("name") or "").lower()
-            for ident in set(re.findall(r"[A-Za-z_][A-Za-z0-9_]+", h["text"])):
+            # sorted() so expansion is deterministic: set iteration order over
+            # strings varies per process (hash seed), which made eval flaky
+            for ident in sorted(set(re.findall(r"[A-Za-z_][A-Za-z0-9_]+", h["text"]))):
                 low = ident.lower()
                 if len(low) < 4 or low == hname or low in GENERIC_NAME_TOKENS:
                     continue

@@ -337,3 +337,13 @@ Head-to-head on astral-hr ("how JWT auth + OAuth strategies work"):
 - It did **not** fix the target case: astral-hr's broad auth query still didn't surface `auth.module.ts` — because the module file isn't retrieved into the candidate pool at all (it's terse wiring with few query terms), so neither a relevance boost nor expansion-from-hub can fire on it. The strategies gap is a **recall** problem (the files don't reach the pool for a broad query), which a ranking-stage boost cannot solve.
 
 **Lesson:** a boost only re-ranks what retrieval already found; it can't conjure un-retrieved files. To close the doc-heavy / wiring-file gap you'd need a recall-stage change (e.g. a structure-aware pass that always pulls a feature's module + its imports when a feature dir is hit), not another ranking prior. Left for future work; reverted to keep the benchmark honest (back to recall@3=0.896).
+
+---
+
+# Run 8 — structure-aware recall (tried, reverted) + a determinism fix
+
+**Date:** 2026-06-04. Tried feature-directory cohesion: when >=2 top candidates share a feature dir, pull that dir's siblings (module + strategies) into the pool. **Reverted** — like Run 7 it regressed the eval and, crucially, still didn't surface astral-hr's strategy files: feature-expansion *did* add them to recall, but the reranker ranks the login methods + `interface User` chunks above the terse passport-strategy configs. So the gap is **ranking/model quality**, not recall or architecture — two pool-augmentation attempts (Run 7 boost, Run 8 cohesion) both failed to move it.
+
+**Valuable byproduct:** the eval's run-to-run variance (0.896 vs 0.875 on identical code) exposed a real **non-determinism bug** — `_expand_pool` iterated a `set()` of identifier strings, whose order varies per process (hash-seed), so different callees were added when the cap hit. Fixed with `sorted(set(...))`; eval is now reproducible at recall@3=0.896 / hit@3=0.958. Kept this fix; reverted the feature-cohesion experiment.
+
+**Conclusion:** the engine is at its heuristic ceiling on this benchmark. Remaining gap to Augment (terse-wiring / doc-heavy ranking) is dominated by retrieval *model* quality (their proprietary embeddings + reranker), not by cheaply-addable structure — confirmed by two measured negative results.
