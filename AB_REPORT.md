@@ -347,3 +347,18 @@ Head-to-head on astral-hr ("how JWT auth + OAuth strategies work"):
 **Valuable byproduct:** the eval's run-to-run variance (0.896 vs 0.875 on identical code) exposed a real **non-determinism bug** — `_expand_pool` iterated a `set()` of identifier strings, whose order varies per process (hash-seed), so different callees were added when the cap hit. Fixed with `sorted(set(...))`; eval is now reproducible at recall@3=0.896 / hit@3=0.958. Kept this fix; reverted the feature-cohesion experiment.
 
 **Conclusion:** the engine is at its heuristic ceiling on this benchmark. Remaining gap to Augment (terse-wiring / doc-heavy ranking) is dominated by retrieval *model* quality (their proprietary embeddings + reranker), not by cheaply-addable structure — confirmed by two measured negative results.
+
+---
+
+# Run 9 — stronger reranker (rerank-2.5 full): tried, reverted
+
+**Date:** 2026-06-04. Acting on the deep-research finding that a stronger reranker is the highest-leverage lever, swapped `rerank-2.5-lite` → `rerank-2.5` (full). Measured on the deterministic eval:
+
+| | recall@3 | hit@3 | recall@8 |
+|---|---|---|---|
+| rerank-2.5-lite (baseline) | 0.896 | 0.958 | 0.979 |
+| rerank-2.5 (full) | **0.833** | **0.917** | **0.958** |
+
+**Worse, and reverted.** Not a coarse-label artifact: certbot "ACME protocol client" lost `acme/` from top-3 entirely (unambiguous miss), and it did NOT fix the target failure mode — astral-hr's auth query returned an identical doc/interface-heavy list, no strategy files. Voyage's vendor-reported +7-8% (NDCG@10 over a 93-dataset suite) did not transfer to recall@k on this task — exactly the "measured over marketing" caution. Kept `rerank-2.5-lite`.
+
+**Three measured negative results now (Run 7 boost, Run 8 cohesion, Run 9 full reranker):** cheap swaps don't move this engine off its local optimum. The evidence-backed real gains require the heavier open-source stack — CodeRankEmbed (retriever) + CodeRankLLM (reranker), which lifted SWE-Bench-Lite function-localization Top-5 from 50.0%→67.5% in the literature — measured via CoIR (`pip install coir-eval`). That is a project-sized change, not a one-liner; deferred deliberately rather than guessed at.
