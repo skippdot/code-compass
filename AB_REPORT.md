@@ -320,3 +320,20 @@ Head-to-head on astral-hr ("how JWT auth + OAuth strategies work"):
 
 ## State
 24/24 unit tests green. The engine now: indexes any git repo (gitignore-aware, incremental), retrieves hybrid + RRF + code-prior + name-boost + MMR + graph-expansion, reranks (Voyage or local), serves over MCP, auto-reindexes on save, and is measured by a 3-repo eval harness. Remaining edge for Augment: on doc-heavy repos it still resolves the *specific* strategy/module files a touch better (ours surfaces the service/controller but not always every `*.strategy.ts`); a future lever is type/module-aware boosting or a larger reranker.
+
+---
+
+# Run 7 — module-aware boost (tried, reverted: measured regression)
+
+**Date:** 2026-06-04. Hypothesis: boost "wiring" files (NestJS `*.module.ts`, Django `urls.py`/`apps.py`, `main.py`) so they surface and act as graph-expansion hubs (a module imports a feature's providers → pull its strategies). Implemented a `_structural_boost` (×1.2) on relevance + made wiring files expansion sources.
+
+**Result — reverted.** Measured on the eval, it *regressed*:
+| k=3 | recall | hit |
+|---|---|---|
+| without (Run 6) | 0.896 | 0.958 |
+| with module-boost | 0.875 | 0.917 |
+
+- It displaced a real answer: astral-hr "guest session → registered user" lost `guest/` from top-3 (a boosted wiring file took the slot).
+- It did **not** fix the target case: astral-hr's broad auth query still didn't surface `auth.module.ts` — because the module file isn't retrieved into the candidate pool at all (it's terse wiring with few query terms), so neither a relevance boost nor expansion-from-hub can fire on it. The strategies gap is a **recall** problem (the files don't reach the pool for a broad query), which a ranking-stage boost cannot solve.
+
+**Lesson:** a boost only re-ranks what retrieval already found; it can't conjure un-retrieved files. To close the doc-heavy / wiring-file gap you'd need a recall-stage change (e.g. a structure-aware pass that always pulls a feature's module + its imports when a feature dir is hit), not another ranking prior. Left for future work; reverted to keep the benchmark honest (back to recall@3=0.896).
