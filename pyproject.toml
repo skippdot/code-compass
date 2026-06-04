@@ -1,0 +1,30 @@
+[project]
+name = "my-context-engine"
+version = "0.1.0"
+description = "Self-hosted code-context search exposed over MCP (a DIY Augment Context Engine)"
+requires-python = ">=3.10"
+dependencies = [
+    "voyageai>=0.3.7",            # embeddings (voyage-code-3, code-tuned)
+    "tree-sitter>=0.25",          # syntax-aware chunking
+    "tree-sitter-language-pack>=1.8",  # prebuilt grammars
+    "lancedb>=0.13",              # local vector store (single file, no server)
+    "rank-bm25>=0.2.2",           # lexical half of hybrid search
+    "mcp>=1.0",                   # MCP stdio server SDK
+]
+
+[dependency-groups]
+dev = ["ruff>=0.15"]
+# offline embeddings (heavy: pulls torch) — install with `uv pip install -e '.[local]'`
+local = ["sentence-transformers>=3.0"]
+
+[project.optional-dependencies]
+local = ["sentence-transformers>=3.0"]
+watch = ["watchdog>=4.0"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# E/F = pyflakes+pycodestyle, I = import sorting, UP = pyupgrade, B = bugbear
+select = ["E", "F", "I", "UP", "B"]

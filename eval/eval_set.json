@@ -1,0 +1,28 @@
+[
+  {"repo": "invoicer", "query": "where is the invoice due date calculated from the company policy", "expect": ["models.py"]},
+  {"repo": "invoicer", "query": "how are VAT and invoice totals computed including reverse-charge", "expect": ["models.py", "ai_review.py"]},
+  {"repo": "invoicer", "query": "the PDF generation pipeline from the view through context building to the rendered template", "expect": ["services/pdf.py", "services/render.py"]},
+  {"repo": "invoicer", "query": "how recurring invoices are generated from a profile", "expect": ["services/recurring.py"]},
+  {"repo": "invoicer", "query": "how overdue payment reminder emails are drafted and sent", "expect": ["services/reminders.py", "reminder_ai.py"]},
+  {"repo": "invoicer", "query": "accounts-receivable aging report bucketed by days overdue", "expect": ["views.py", "aging.html"]},
+  {"repo": "invoicer", "query": "email login and the authentication backend", "expect": ["auth_backends.py"]},
+  {"repo": "invoicer", "query": "internationalization invoice template language versus UI language", "expect": ["middleware.py", "services/render.py"]},
+
+  {"repo": "astral-hr", "query": "how does JWT authentication and login work", "expect": ["auth/"]},
+  {"repo": "astral-hr", "query": "OAuth social login strategies for google and github", "expect": ["strategies/"]},
+  {"repo": "astral-hr", "query": "natal chart and astrology compatibility computation", "expect": ["astrology/"]},
+  {"repo": "astral-hr", "query": "how is the LLM called for the chat feature", "expect": ["llm/", "chat/"]},
+  {"repo": "astral-hr", "query": "the candidate profile matching algorithm", "expect": ["matching/"]},
+  {"repo": "astral-hr", "query": "the onboarding wizard flow and steps", "expect": ["wizard/"]},
+  {"repo": "astral-hr", "query": "admin dashboard endpoints and moderation", "expect": ["admin/"]},
+  {"repo": "astral-hr", "query": "guest session and converting a guest to a registered user", "expect": ["guest/"]},
+
+  {"repo": "certbot", "query": "the ACME protocol client and challenge solving", "expect": ["acme/"]},
+  {"repo": "certbot", "query": "how certificates are renewed", "expect": ["renewal"]},
+  {"repo": "certbot", "query": "the nginx plugin installer and configurator", "expect": ["certbot_nginx"]},
+  {"repo": "certbot", "query": "the apache plugin configurator", "expect": ["certbot_apache"]},
+  {"repo": "certbot", "query": "the plugin interface and plugin discovery", "expect": ["plugins"]},
+  {"repo": "certbot", "query": "the main command-line entry point and argument parsing", "expect": ["main.py", "cli"]},
+  {"repo": "certbot", "query": "account registration and key management with the ACME server", "expect": ["account"]},
+  {"repo": "certbot", "query": "DNS challenge for route53", "expect": ["dns_route53"]}
+]
