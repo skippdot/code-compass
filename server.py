@@ -5,7 +5,7 @@ MCP client), exactly like Augment's codebase-retrieval: a natural-language
 query in, ranked code chunks out — but running locally on your own index.
 
 Register it once:
-    claude mcp add my-engine -- /abs/path/.venv/bin/python /abs/path/server.py
+    claude mcp add compass -- /abs/path/.venv/bin/python /abs/path/server.py
 then call the `codebase_search` tool from any session.
 """
 
@@ -16,7 +16,7 @@ import config  # noqa: F401  -- loads .env (VOYAGE_API_KEY) before clients init
 from indexer import DB_PATH
 from retriever import Retriever, _format
 
-mcp = FastMCP("my-context-engine")
+mcp = FastMCP("code-compass")
 
 # Retrievers are expensive to build (they load the whole corpus for BM25), so
 # cache one per table for the life of the server process.

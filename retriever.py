@@ -17,9 +17,9 @@ import lancedb
 from rank_bm25 import BM25Okapi
 
 import config  # noqa: F401  -- loads .env
-from embedder import Embedder, VoyageEmbedder
+from embedder import Embedder, make_embedder
 from indexer import DB_PATH
-from reranker import Reranker, VoyageReranker
+from reranker import Reranker, make_reranker
 
 
 def _tokenize(text: str) -> list[str]:
@@ -169,8 +169,8 @@ class Retriever:
         mmr_lambda: float = 0.7,
     ):
         self.table = lancedb.connect(db_path).open_table(table_name)
-        self.embedder = embedder or VoyageEmbedder()
-        self.reranker = reranker if reranker is not None else VoyageReranker()
+        self.embedder = embedder or make_embedder()
+        self.reranker = reranker if reranker is not None else make_reranker()
         self.mmr_lambda = mmr_lambda  # 1.0 = pure relevance, lower = more diverse
         # BM25 needs the whole corpus in memory; fine for personal-repo scale.
         self.rows = self.table.to_arrow().to_pylist()

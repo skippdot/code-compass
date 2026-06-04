@@ -12,6 +12,7 @@ a shared space during the model's contrastive training. We honor that split
 with two public methods instead of one.
 """
 
+import os
 import random
 import time
 from abc import ABC, abstractmethod
@@ -43,7 +44,10 @@ class VoyageEmbedder(Embedder):
     """
 
     MAX_BATCH = 128            # Voyage hard cap on inputs per request
-    MAX_BATCH_TOKENS = 120_000  # Voyage hard cap on total tokens per request
+    # Voyage's hard cap is 120k tokens/request; we pack against 80k using a fast
+    # char-based estimate. The margin absorbs the estimate's under-count on dense
+    # code (~1.4x) so we never overflow — without tokenizing every chunk.
+    MAX_BATCH_TOKENS = 80_000
 
     MAX_RETRIES = 6      # attempts on rate-limit before giving up
     BASE_DELAY = 2.0     # seconds; doubled each retry (2, 4, 8, ... + jitter)
@@ -55,17 +59,13 @@ class VoyageEmbedder(Embedder):
         self.model = model
         self.dim = dim
 
-    def _est_tokens(self, text: str) -> int:
-        """Token count for batch packing.
-
-        Uses Voyage's real (local) tokenizer when a client is present — code is
-        token-denser than the ~4-chars/token rule of thumb, which underestimates
-        and lets batches blow past the 120k cap. Falls back to the heuristic
-        only when there's no client (offline unit tests)."""
-        client = getattr(self, "client", None)
-        if client is not None:
-            return client.count_tokens([text], self.model)
-        return max(1, len(text) // 4)
+    @staticmethod
+    def _est_tokens(text: str) -> int:
+        """Fast char-based token estimate for batch packing (~3 chars/token —
+        conservative for dense code). Cheap on purpose: tokenizing every chunk
+        with the real tokenizer made bulk indexing O(N) tokenizer calls and
+        dominated runtime. The MAX_BATCH_TOKENS margin covers the imprecision."""
+        return max(1, len(text) // 3)
 
     def _embed_batch(self, texts: list[str], input_type: str) -> list[list[float]]:
         """One API call for a pre-sized batch, with backoff on rate limits.
@@ -159,3 +159,13 @@ class LocalEmbedder(Embedder):
             [text], prompt_name="query", normalize_embeddings=True
         )[0]
         return vec.tolist()
+
+
+def make_embedder() -> Embedder:
+    """Pick the embedder from CODE_COMPASS_EMBED (voyage | local). Default voyage.
+
+    `local` runs fully offline (no API) — on the CoIR cosqa benchmark the local
+    Qwen3/CodeRankEmbed-class model matches voyage-code-3 within noise. Switching
+    backends requires re-indexing: vectors are model-specific."""
+    backend = os.environ.get("CODE_COMPASS_EMBED", "voyage").lower()
+    return LocalEmbedder() if backend == "local" else VoyageEmbedder()

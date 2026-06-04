@@ -1,8 +1,17 @@
 [project]
-name = "my-context-engine"
+name = "code-compass"
 version = "0.1.0"
-description = "Self-hosted code-context search exposed over MCP (a DIY Augment Context Engine)"
+description = "Self-hosted code-context search over MCP — hybrid retrieval + rerank for AI coding agents"
+readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.10"
+authors = [{ name = "skippdot" }]
+keywords = ["mcp", "code-search", "rag", "code-retrieval", "embeddings", "tree-sitter"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "voyageai>=0.3.7",            # embeddings (voyage-code-3, code-tuned)
     "tree-sitter>=0.25",          # syntax-aware chunking
@@ -20,6 +29,9 @@ local = ["sentence-transformers>=3.0"]
 [project.optional-dependencies]
 local = ["sentence-transformers>=3.0"]
 watch = ["watchdog>=4.0"]
+
+[project.urls]
+Repository = "https://github.com/skippdot/code-compass"
 
 [tool.ruff]
 line-length = 100

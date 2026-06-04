@@ -11,6 +11,7 @@ cross-encoder, mirroring the Embedder design.
 """
 
 import math
+import os
 from abc import ABC, abstractmethod
 
 
@@ -71,3 +72,14 @@ class LocalReranker(Reranker):
         ]
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored
+
+
+def make_reranker() -> Reranker | None:
+    """Pick the reranker from CODE_COMPASS_RERANK (voyage | local | none).
+    Default voyage. `local` is offline (cross-encoder); `none` skips reranking."""
+    backend = os.environ.get("CODE_COMPASS_RERANK", "voyage").lower()
+    if backend == "none":
+        return None
+    if backend == "local":
+        return LocalReranker()
+    return VoyageReranker()

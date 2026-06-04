@@ -19,7 +19,7 @@ import lancedb
 
 import config  # noqa: F401  -- loads .env so VOYAGE_API_KEY is present
 from chunker import CHUNKER_VERSION, chunk_file
-from embedder import Embedder, VoyageEmbedder
+from embedder import Embedder, make_embedder
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "store", "lancedb")
 
@@ -128,7 +128,7 @@ def index_repo(
     """
     repo_path = os.path.abspath(repo_path)
     table_name = table_name or os.path.basename(repo_path.rstrip("/"))
-    embedder = embedder or VoyageEmbedder()
+    embedder = embedder or make_embedder()
     db = lancedb.connect(DB_PATH)
 
     # load the previous index (if any), grouped by file, to reuse unchanged work
