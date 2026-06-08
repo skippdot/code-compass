@@ -71,15 +71,42 @@ def test_existing_repo_not_reindexed_from_guessed_cwd():
     restore = _with_paths({})  # no saved path
     server.index_repo = lambda *a, **k: calls.append(a)  # tripwire
     server._repos = lambda: ["existing"]
-    server._initialized.discard("existing")
+    server._indexed_from.pop("existing", None)
     try:
         assert server._ensure_ready("existing", None) is None
         assert calls == [], "must not reindex an existing repo from a guessed cwd"
-        assert "existing" in server._initialized
+        assert "existing" in server._indexed_from
     finally:
         server.index_repo, server._repos = orig_index, orig_repos
-        server._initialized.discard("existing")
+        server._indexed_from.pop("existing", None)
         restore()
+
+
+def test_explicit_path_reindexes_even_after_search_as_is():
+    """An explicit repo_path is honored even after the repo was first touched
+    as search-as-is — the caller's path must not be silently dropped."""
+    calls = []
+    orig = (server.index_repo, server._repos, server._save_path,
+            server._start_watcher)
+    server.index_repo = lambda p, r: calls.append((p, r))
+    server._repos = lambda: ["r"]
+    server._save_path = lambda *a: None
+    server._start_watcher = lambda *a: None
+    server._indexed_from.pop("r", None)
+    try:
+        # first: no path -> searched as-is, nothing indexed
+        assert server._ensure_ready("r", None) is None
+        assert calls == []
+        # then: explicit path -> must reindex from it now
+        assert server._ensure_ready("r", "/proj/r") is None
+        assert calls == [("/proj/r", "r")]
+        # repeat same path -> no-op (watcher covers later changes)
+        assert server._ensure_ready("r", "/proj/r") is None
+        assert calls == [("/proj/r", "r")]
+    finally:
+        (server.index_repo, server._repos, server._save_path,
+         server._start_watcher) = orig
+        server._indexed_from.pop("r", None)
 
 
 if __name__ == "__main__":

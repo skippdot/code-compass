@@ -68,9 +68,10 @@ def _repos() -> list[str]:
 # fresh with an in-process watcher for the life of this server (== the session,
 # since each Claude session spawns its own stdio server subprocess). -----------
 
-# repos already brought up to date during THIS process; guards against
-# re-walking the tree on every search (the watcher handles changes after).
-_initialized: set[str] = set()
+# repos handled during THIS process -> the path we (re)indexed them from this
+# session (None = an existing index searched as-is, no path). Guards against
+# re-walking the tree on every search; the watcher handles later changes.
+_indexed_from: dict[str, str | None] = {}
 _watchers: dict[str, object] = {}  # repo -> watchdog Observer (process-lived)
 _index_lock = threading.Lock()
 
@@ -120,9 +121,16 @@ def _safe_cwd() -> str | None:
 
 
 def _start_watcher(repo: str, path: str) -> None:
-    """Spawn an in-process auto-reindex watcher for `path`, once per repo."""
-    if repo in _watchers:
-        return
+    """(Re)spawn the in-process auto-reindex watcher for `repo` on `path`.
+
+    Replaces any existing watcher so that re-indexing from a new path also moves
+    the watcher there. Called only when the index path is new/changed (a repeat
+    of the same path short-circuits earlier), so this never thrashes.
+    """
+    old = _watchers.pop(repo, None)
+    if old is not None:
+        with contextlib.suppress(Exception):
+            old.stop()
     try:
         from watcher import start_watch  # lazy: `watch` extra is optional
     except Exception:
@@ -134,30 +142,32 @@ def _start_watcher(repo: str, path: str) -> None:
 def _ensure_ready(repo: str, repo_path: str | None) -> str | None:
     """Make `repo` searchable; return an error message, or None on success.
 
-    On the first touch this session: resolve a path, index it (incremental, so
-    a restart only re-embeds files that changed), persist the path, and start a
-    watcher. Subsequent calls are no-ops — the watcher + version-poll keep it
-    fresh. A repo already on disk but with no known path stays searchable; it
-    just can't be auto-refreshed here.
+    First touch this session: resolve a path, index it (incremental, so a
+    restart only re-embeds changed files), persist the path, start a watcher.
+    An explicit `repo_path` is always honored — even after the repo was first
+    searched as-is — so naming a path mid-session refreshes from it rather than
+    being silently dropped. Repeating the same path is a no-op (the watcher +
+    version-poll keep it fresh); a repo already on disk with no path is searched
+    as-is and never reindexed from a guessed dir (which could clobber it).
     """
-    if repo in _initialized:
+    explicit = os.path.abspath(repo_path) if repo_path else None
+    # nothing new to do: handled this session and the caller named no new path
+    if explicit is None and repo in _indexed_from:
         return None
     with _index_lock:
-        if repo in _initialized:  # another call won the race while we waited
+        if explicit is None and repo in _indexed_from:  # lost the race; fine
             return None
-        path = _resolve_path(repo, repo_path)
+        path = explicit or _resolve_path(repo, None)
         if path is None:
-            # already on disk (e.g. indexed manually): search as-is — never
-            # reindex from a guessed cwd, which could clobber it with the
-            # wrong directory.
-            if repo in _repos():
-                _initialized.add(repo)
+            if repo in _repos():       # existing index, no path: search as-is
+                _indexed_from[repo] = None
                 return None
-            # brand-new repo and no path given: last-resort guess the cwd.
-            path = _safe_cwd()
+            path = _safe_cwd()         # brand-new repo: last-resort cwd guess
             if path is None:
                 return (f"No index named '{repo}' and no path to build it from. "
                         f"Retry as codebase_search(..., repo_path='/path/to/repo').")
+        if _indexed_from.get(repo) == path:  # already indexed from here this run
+            return None
         try:
             # index_repo prints progress to stderr; redirect any stray stdout
             # so it can never corrupt the MCP JSON-RPC stream on stdout.
@@ -167,7 +177,7 @@ def _ensure_ready(repo: str, repo_path: str | None) -> str | None:
             return f"indexing {path} failed: {exc}"
         _save_path(repo, path)
         _start_watcher(repo, path)
-        _initialized.add(repo)
+        _indexed_from[repo] = path
     return None
 
 
