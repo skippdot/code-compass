@@ -42,21 +42,35 @@ class _DebouncedReindex(FileSystemEventHandler):
             self._timer.start()
 
 
-def watch(repo_path: str, table_name: str | None = None) -> None:
+def start_watch(repo_path: str, table_name: str | None = None) -> Observer:
+    """Start a debounced auto-reindex observer and return it (non-blocking).
+
+    The watchdog Observer runs on its own thread, so an in-process caller (the
+    MCP server) can keep one alive for the life of the process without the
+    blocking loop in `watch()`. All progress goes to stderr so it never
+    corrupts an MCP server's stdout JSON-RPC stream.
+    """
     repo_path = os.path.abspath(repo_path)
 
     def reindex():
-        print("change detected -> reindexing...")
+        print("change detected -> reindexing...", file=sys.stderr)
         try:
             index_repo(repo_path, table_name)
         except Exception as exc:  # keep watching even if one run fails
-            print(f"reindex failed: {exc}")
+            print(f"reindex failed: {exc}", file=sys.stderr)
 
     handler = _DebouncedReindex(reindex)
     observer = Observer()
     observer.schedule(handler, repo_path, recursive=True)
     observer.start()
-    print(f"watching {repo_path} (Ctrl-C to stop)")
+    return observer
+
+
+def watch(repo_path: str, table_name: str | None = None) -> None:
+    """Blocking CLI form: watch until Ctrl-C."""
+    observer = start_watch(repo_path, table_name)
+    print(f"watching {os.path.abspath(repo_path)} (Ctrl-C to stop)",
+          file=sys.stderr)
     try:
         while True:
             time.sleep(1)

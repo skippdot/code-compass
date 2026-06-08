@@ -156,7 +156,7 @@ def index_repo(
     new_rows: list[dict] = []
     if pending:
         print(f"embedding {len(pending)} chunks from {changed_files} "
-              f"changed/new files...")
+              f"changed/new files...", file=sys.stderr)
         vectors = embedder.embed_documents([c.text for c, _ in pending])
         new_rows = [
             {"vector": v, "file_hash": h, **asdict(c)}
@@ -165,12 +165,13 @@ def index_repo(
 
     rows = reused_rows + new_rows
     if not rows:
-        print(f"no indexable chunks found in {repo_path}")
+        print(f"no indexable chunks found in {repo_path}", file=sys.stderr)
         return 0
 
     db.create_table(table_name, data=rows, mode="overwrite")
     print(f"indexed '{table_name}': {len(rows)} chunks "
-          f"({reused_files} files reused, {changed_files} re-embedded)")
+          f"({reused_files} files reused, {changed_files} re-embedded)",
+          file=sys.stderr)
     return len(rows)
 
 

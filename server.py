@@ -9,11 +9,17 @@ Register it once:
 then call the `codebase_search` tool from any session.
 """
 
+import contextlib
+import json
+import os
+import sys
+import threading
+
 import lancedb
 from mcp.server.fastmcp import FastMCP
 
 import config  # noqa: F401  -- loads .env (VOYAGE_API_KEY) before clients init
-from indexer import DB_PATH
+from indexer import DB_PATH, index_repo
 from retriever import Retriever, _format
 
 mcp = FastMCP("code-compass")
@@ -58,6 +64,106 @@ def _repos() -> list[str]:
         return []
 
 
+# --- auto-index: index a repo on first search of the session, then keep it
+# fresh with an in-process watcher for the life of this server (== the session,
+# since each Claude session spawns its own stdio server subprocess). -----------
+
+# repos already brought up to date during THIS process; guards against
+# re-walking the tree on every search (the watcher handles changes after).
+_initialized: set[str] = set()
+_watchers: dict[str, object] = {}  # repo -> watchdog Observer (process-lived)
+_index_lock = threading.Lock()
+
+# remembers where each table was indexed from, so a later session can reindex
+# (incrementally — only changed files re-embed) without re-specifying the path.
+_PATHS_FILE = os.path.join(os.path.dirname(DB_PATH), "repo_paths.json")
+
+
+def _load_paths() -> dict[str, str]:
+    try:
+        with open(_PATHS_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_path(repo: str, path: str) -> None:
+    paths = _load_paths()
+    paths[repo] = path
+    os.makedirs(os.path.dirname(_PATHS_FILE), exist_ok=True)
+    with open(_PATHS_FILE, "w") as f:
+        json.dump(paths, f, indent=2)
+
+
+def _resolve_path(repo: str, repo_path: str | None) -> str | None:
+    """Decide which directory to (re)index for `repo`, or None if unresolved.
+
+    `repo_path` is the explicit arg from the caller (may be None);
+    `_load_paths()` returns the repo -> path map remembered across sessions.
+    """
+    # an explicit path always wins — the caller is telling us exactly what to
+    # index, even if a stale mapping exists for this name.
+    if repo_path:
+        return os.path.abspath(repo_path)
+    # otherwise reuse the path this table was indexed from last session.
+    saved = _load_paths().get(repo)
+    if saved:
+        return os.path.abspath(saved)
+    # last resort: the server's working dir, so "search the current project"
+    # just works — but refuse $HOME / the filesystem root, which aren't a
+    # project and would drag an enormous, wrong tree into the index.
+    cwd = os.path.abspath(os.getcwd())
+    if cwd in (os.path.expanduser("~"), os.path.sep):
+        return None
+    return cwd
+
+
+def _start_watcher(repo: str, path: str) -> None:
+    """Spawn an in-process auto-reindex watcher for `path`, once per repo."""
+    if repo in _watchers:
+        return
+    try:
+        from watcher import start_watch  # lazy: `watch` extra is optional
+    except Exception:
+        return  # not installed — indexing still works, just no live refresh
+    with contextlib.suppress(Exception):
+        _watchers[repo] = start_watch(path, repo)
+
+
+def _ensure_ready(repo: str, repo_path: str | None) -> str | None:
+    """Make `repo` searchable; return an error message, or None on success.
+
+    On the first touch this session: resolve a path, index it (incremental, so
+    a restart only re-embeds files that changed), persist the path, and start a
+    watcher. Subsequent calls are no-ops — the watcher + version-poll keep it
+    fresh. A repo already on disk but with no known path stays searchable; it
+    just can't be auto-refreshed here.
+    """
+    if repo in _initialized:
+        return None
+    with _index_lock:
+        if repo in _initialized:  # another call won the race while we waited
+            return None
+        path = _resolve_path(repo, repo_path)
+        if path is None:
+            if repo in _repos():
+                _initialized.add(repo)
+                return None
+            return (f"No index named '{repo}' and no path to build it from. "
+                    f"Retry as codebase_search(..., repo_path='/path/to/repo').")
+        try:
+            # index_repo prints progress to stderr; redirect any stray stdout
+            # so it can never corrupt the MCP JSON-RPC stream on stdout.
+            with contextlib.redirect_stdout(sys.stderr):
+                index_repo(path, repo)
+        except Exception as exc:
+            return f"indexing {path} failed: {exc}"
+        _save_path(repo, path)
+        _start_watcher(repo, path)
+        _initialized.add(repo)
+    return None
+
+
 @mcp.tool()
 def list_indexed_repos() -> str:
     """List the repositories currently indexed and searchable."""
@@ -67,7 +173,9 @@ def list_indexed_repos() -> str:
 
 
 @mcp.tool()
-def codebase_search(information_request: str, repo: str, k: int = 8) -> str:
+def codebase_search(
+    information_request: str, repo: str, repo_path: str | None = None, k: int = 8
+) -> str:
     """PRIMARY tool for understanding a codebase — prefer it as the FIRST CHOICE
     for any "where / how / what" question about an indexed repo.
 
@@ -81,12 +189,18 @@ def codebase_search(information_request: str, repo: str, k: int = 8) -> str:
       * "where is the invoice due date calculated"
       * "how is authentication and per-company isolation enforced"
       * "the PDF generation pipeline from view to template"
-    `repo` is the indexed table name (call list_indexed_repos to see them).
+    `repo` is the index/table name (call list_indexed_repos to see them).
+
+    Auto-index: to search a repo that isn't indexed yet, pass `repo_path` (its
+    absolute path) once — it will be indexed on this first call and then kept
+    live by a file-watcher for the rest of the session. On later sessions the
+    path is remembered, so the same `repo` re-indexes incrementally (only
+    changed files) on first use; `repo_path` is then optional.
     Use plain grep only for finding ALL occurrences of a known exact identifier.
     """
-    if repo not in _repos():
-        avail = ", ".join(_repos()) or "(none)"
-        return f"No index named '{repo}'. Available: {avail}"
+    err = _ensure_ready(repo, repo_path)
+    if err:
+        return err
 
     hits = _get(repo).search(information_request, k=k)
     if not hits:
