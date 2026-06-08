@@ -94,13 +94,10 @@ class VoyageEmbedder(Embedder):
         """Yield sublists of `texts`, each within MAX_BATCH inputs and
         MAX_BATCH_TOKENS total estimated tokens.
 
-        TODO(human): implement the greedy packing loop. Walk `texts` once,
-        accumulating into a current batch; flush (yield) the batch when adding
-        the next chunk would exceed either MAX_BATCH (count) or
-        MAX_BATCH_TOKENS (sum of self._est_tokens). Don't forget the final
-        partial batch. Edge case to decide on: a single chunk whose own token
-        estimate already exceeds MAX_BATCH_TOKENS — yield it alone (the API
-        truncates it) rather than dropping or infinite-looping on it.
+        Greedy single pass: accumulate into the current batch, flushing when the
+        next chunk would exceed either the count or the token cap. A lone chunk
+        whose own estimate already blows the token cap is yielded by itself (the
+        API truncates it) rather than dropped or looped on forever.
         """
         batch: list[str] = []
         batch_tokens = 0
