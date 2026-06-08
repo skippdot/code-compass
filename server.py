@@ -19,14 +19,36 @@ from retriever import Retriever, _format
 mcp = FastMCP("code-compass")
 
 # Retrievers are expensive to build (they load the whole corpus for BM25), so
-# cache one per table for the life of the server process.
-_retrievers: dict[str, Retriever] = {}
+# cache one per table — but remember which on-disk version it was built from,
+# so a reindex (manual or via watcher.py) doesn't stay invisible to this
+# long-lived process. Value is (retriever, table_version_it_was_built_from).
+_retrievers: dict[str, tuple[Retriever, int | None]] = {}
+
+
+def _table_version(repo: str) -> int | None:
+    """Current on-disk version of the table, or None if it's missing.
+
+    LanceDB bumps this integer on every overwrite, so it's a cheap freshness
+    probe (manifest read, no corpus load) to tell whether the cached Retriever
+    has gone stale relative to a fresh index on disk.
+    """
+    try:
+        return lancedb.connect(DB_PATH).open_table(repo).version
+    except Exception:
+        return None
 
 
 def _get(repo: str) -> Retriever:
-    if repo not in _retrievers:
-        _retrievers[repo] = Retriever(repo)
-    return _retrievers[repo]
+    """Return a Retriever for `repo`, rebuilding it if the index changed on disk.
+
+    Without the version check the server would serve whatever corpus it loaded
+    at first use forever — a reindex would only take effect after a restart.
+    """
+    current = _table_version(repo)
+    cached = _retrievers.get(repo)
+    if cached is None or cached[1] != current:
+        _retrievers[repo] = (Retriever(repo), current)
+    return _retrievers[repo][0]
 
 
 def _repos() -> list[str]:
