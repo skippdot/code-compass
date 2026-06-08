@@ -96,22 +96,23 @@ def _save_path(repo: str, path: str) -> None:
 
 
 def _resolve_path(repo: str, repo_path: str | None) -> str | None:
-    """Decide which directory to (re)index for `repo`, or None if unresolved.
+    """A *known* path to index `repo` from, or None if we don't have one.
 
-    `repo_path` is the explicit arg from the caller (may be None);
-    `_load_paths()` returns the repo -> path map remembered across sessions.
+    Explicit arg wins (the caller is naming exactly what to index, even over a
+    stale mapping); otherwise the path this table was indexed from in a past
+    session. Deliberately does NOT guess the cwd — that fallback lives in
+    `_ensure_ready` and only applies to repos not yet on disk, so we never
+    clobber an existing index by re-indexing a guessed directory.
     """
-    # an explicit path always wins — the caller is telling us exactly what to
-    # index, even if a stale mapping exists for this name.
     if repo_path:
         return os.path.abspath(repo_path)
-    # otherwise reuse the path this table was indexed from last session.
     saved = _load_paths().get(repo)
-    if saved:
-        return os.path.abspath(saved)
-    # last resort: the server's working dir, so "search the current project"
-    # just works — but refuse $HOME / the filesystem root, which aren't a
-    # project and would drag an enormous, wrong tree into the index.
+    return os.path.abspath(saved) if saved else None
+
+
+def _safe_cwd() -> str | None:
+    """The server's working dir as a last-resort index target, unless it's a
+    dangerous root ($HOME / filesystem root) that isn't a project."""
     cwd = os.path.abspath(os.getcwd())
     if cwd in (os.path.expanduser("~"), os.path.sep):
         return None
@@ -146,11 +147,17 @@ def _ensure_ready(repo: str, repo_path: str | None) -> str | None:
             return None
         path = _resolve_path(repo, repo_path)
         if path is None:
+            # already on disk (e.g. indexed manually): search as-is — never
+            # reindex from a guessed cwd, which could clobber it with the
+            # wrong directory.
             if repo in _repos():
                 _initialized.add(repo)
                 return None
-            return (f"No index named '{repo}' and no path to build it from. "
-                    f"Retry as codebase_search(..., repo_path='/path/to/repo').")
+            # brand-new repo and no path given: last-resort guess the cwd.
+            path = _safe_cwd()
+            if path is None:
+                return (f"No index named '{repo}' and no path to build it from. "
+                        f"Retry as codebase_search(..., repo_path='/path/to/repo').")
         try:
             # index_repo prints progress to stderr; redirect any stray stdout
             # so it can never corrupt the MCP JSON-RPC stream on stdout.

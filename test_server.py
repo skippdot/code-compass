@@ -32,27 +32,53 @@ def test_saved_mapping_used_when_no_arg():
         restore()
 
 
-def test_cwd_fallback_for_a_project_dir():
+def test_resolve_path_does_not_guess_cwd():
+    # the cwd fallback lives in _safe_cwd, not _resolve_path — so an unknown
+    # repo with no explicit/saved path resolves to None (no clobber risk).
     restore = _with_paths({})
-    orig = os.getcwd
-    os.getcwd = lambda: "/work/myproj"
     try:
-        assert server._resolve_path("anything", None) == "/work/myproj"
+        assert server._resolve_path("unknown", None) is None
     finally:
-        os.getcwd = orig
         restore()
 
 
-def test_refuses_home_and_root():
-    restore = _with_paths({})
+def test_safe_cwd_returns_project_dir():
+    orig = os.getcwd
+    os.getcwd = lambda: "/work/myproj"
+    try:
+        assert server._safe_cwd() == "/work/myproj"
+    finally:
+        os.getcwd = orig
+
+
+def test_safe_cwd_refuses_home_and_root():
     orig = os.getcwd
     try:
         os.getcwd = lambda: os.path.expanduser("~")
-        assert server._resolve_path("r", None) is None
+        assert server._safe_cwd() is None
         os.getcwd = lambda: os.sep
-        assert server._resolve_path("r", None) is None
+        assert server._safe_cwd() is None
     finally:
         os.getcwd = orig
+
+
+def test_existing_repo_not_reindexed_from_guessed_cwd():
+    """Regression: a repo already on disk with no explicit/saved path must be
+    searched as-is, never re-indexed from the guessed cwd (which would clobber
+    it with the wrong directory)."""
+    calls = []
+    orig_index, orig_repos = server.index_repo, server._repos
+    restore = _with_paths({})  # no saved path
+    server.index_repo = lambda *a, **k: calls.append(a)  # tripwire
+    server._repos = lambda: ["existing"]
+    server._initialized.discard("existing")
+    try:
+        assert server._ensure_ready("existing", None) is None
+        assert calls == [], "must not reindex an existing repo from a guessed cwd"
+        assert "existing" in server._initialized
+    finally:
+        server.index_repo, server._repos = orig_index, orig_repos
+        server._initialized.discard("existing")
         restore()
 
 

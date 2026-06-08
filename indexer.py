@@ -148,7 +148,10 @@ def index_repo(
             reused_rows.extend(prev_rows[relpath])
             reused_files += 1
         else:
-            file_chunks = chunk_file(relpath, source)
+            # drop blank chunks: an empty/whitespace-only text would make the
+            # embedding API reject the whole batch ("Input cannot contain empty
+            # strings"), failing the entire index over one stray file.
+            file_chunks = [c for c in chunk_file(relpath, source) if c.text.strip()]
             if file_chunks:  # empty files yield nothing — never "changed"
                 changed_files += 1
                 pending.extend((chunk, h) for chunk in file_chunks)
