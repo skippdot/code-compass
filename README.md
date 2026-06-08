@@ -28,8 +28,8 @@ search:  query ──▶ dense (cosine) ─┐
 | Index | `indexer.py` | walk (respects `.gitignore` via `git ls-files`), chunk, embed, store; incremental by content hash |
 | Retrieve | `retriever.py` | hybrid dense+BM25, RRF fusion, code-vs-docs prior, symbol-name boost, file-diverse MMR, cross-file graph-expansion |
 | Rerank | `reranker.py` | `VoyageReranker` (rerank-2.5-lite) or `LocalReranker` (cross-encoder), swappable |
-| Serve | `server.py` | MCP stdio server: `codebase_search`, `list_indexed_repos` |
-| Watch | `watcher.py` | auto-reindex on file save (debounced) |
+| Serve | `server.py` | MCP stdio server: `codebase_search`, `list_indexed_repos`; auto-indexes a repo on first search and serves a fresh corpus (rebuilds when the on-disk index version changes) |
+| Watch | `watcher.py` | auto-reindex on file save (debounced); runs standalone or in-process inside the server |
 
 ## Install
 
@@ -57,19 +57,34 @@ On the CoIR cosqa benchmark the local embedder is within noise of voyage-code-3 
 
 ## Use
 
-```bash
-python indexer.py /path/to/repo myrepo     # index a repo as table "myrepo"
-python -c "import config; from retriever import Retriever, _format; \
-           [print(_format(h)) for h in Retriever('myrepo').search('how does auth work')]"
-```
-
-Register as an MCP server (works from any Claude Code session):
+Register it once as an MCP server (works from any Claude Code session):
 
 ```bash
 claude mcp add compass -- /abs/path/.venv/bin/python /abs/path/server.py
 ```
 
-Then call `codebase_search(information_request, repo)` from your agent.
+Then just call `codebase_search` from your agent — **no manual indexing step**:
+
+```python
+# first call for a new repo: pass its path; it indexes, then auto-stays-fresh
+codebase_search("how does auth work", repo="myrepo", repo_path="/path/to/repo")
+# later calls (same or future sessions): path is remembered
+codebase_search("where are invoices rendered", repo="myrepo")
+```
+
+On the first search of a repo the server indexes it, remembers its path
+(`store/repo_paths.json`), and starts a file-watcher that keeps the index live
+for the rest of the session. A later session re-indexes **incrementally** (only
+files whose content hash changed) on first use, so startup stays cheap. If you
+omit `repo_path` for an unknown repo it falls back to the server's working
+directory (refusing `$HOME` / the filesystem root).
+
+Prefer to drive it yourself? The pieces still work standalone:
+
+```bash
+python indexer.py /path/to/repo myrepo     # index a repo as table "myrepo"
+python watcher.py /path/to/repo myrepo     # auto-reindex on save (blocking)
+```
 
 ## Benchmark
 
