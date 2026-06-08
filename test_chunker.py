@@ -76,6 +76,24 @@ def test_javascript_functions():
     assert "Svc" in names
 
 
+def test_pathologically_deep_nesting_falls_back_to_windows():
+    # ~3000 nested ifs would overflow the recursive descent at Python's default
+    # recursion limit; one such (generated) file must not abort the index.
+    src = "def f():\n"
+    for i in range(3000):
+        src += "    " * (i + 1) + "if True:\n"
+    src += "    " * 3001 + "return 1\n"
+    chunks = chunk_file("deep.py", src)  # must not raise RecursionError
+    assert chunks, "deep file should still yield window chunks, not crash"
+    assert all(c.kind == "window" for c in chunks)
+
+
+def test_unicode_identifiers_are_named():
+    src = "def café(número):\n    return número\n\nclass Ångström:\n    pass\n"
+    names = {c.name for c in chunk_file("uni.py", src)}
+    assert "café" in names and "Ångström" in names
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):

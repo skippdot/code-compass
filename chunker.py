@@ -210,7 +210,13 @@ def chunk_file(path: str, source: str, language: str | None = None) -> list[Chun
 
     root = parse(language, source)
     chunks: list[Chunk] = []
-    _collect(root, path, language, None, chunks)
+    try:
+        _collect(root, path, language, None, chunks)
+    except RecursionError:
+        # pathologically deep nesting (generated/obfuscated code) blows the
+        # recursive descent. One such file shouldn't abort the whole index —
+        # fall back to fixed windows instead of propagating.
+        return _window_fallback(source, path, language)
 
     # tree-sitter parsed it but found no definitions (e.g. a script of bare
     # statements) — don't drop the file, window it.
