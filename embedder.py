@@ -141,6 +141,7 @@ class LocalEmbedder(Embedder):
     def __init__(self, model: str = "Qwen/Qwen3-Embedding-0.6B"):
         from sentence_transformers import SentenceTransformer
 
+        self.model_name = model  # stable id for the index's embedder tag
         self.model = SentenceTransformer(model)  # auto-selects MPS/CUDA/CPU
         # method was renamed across sentence-transformers versions
         get_dim = getattr(self.model, "get_embedding_dimension", None) or \
@@ -148,8 +149,17 @@ class LocalEmbedder(Embedder):
         self.dim = get_dim()
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        vecs = self.model.encode(texts, normalize_embeddings=True)
-        return [v.tolist() for v in vecs]
+        # encode in bounded batches so peak memory stays flat on big repos
+        # (one giant encode of every chunk can balloon RAM); each batch's
+        # array is freed before the next. Override via CODE_COMPASS_LOCAL_BATCH.
+        bs = max(1, int(os.environ.get("CODE_COMPASS_LOCAL_BATCH", "16")))
+        out: list[list[float]] = []
+        for i in range(0, len(texts), bs):
+            vecs = self.model.encode(
+                texts[i:i + bs], normalize_embeddings=True, batch_size=bs
+            )
+            out.extend(v.tolist() for v in vecs)
+        return out
 
     def embed_query(self, text: str) -> list[float]:
         vec = self.model.encode(

@@ -37,8 +37,25 @@ def test_git_and_directory_events_are_ignored():
     h = _DebouncedReindex(lambda: calls.append(1), delay=0.15)
     h.on_any_event(_Event("/repo/.git/index"))      # git churn
     h.on_any_event(_Event("/repo/subdir", is_directory=True))
+    h.on_any_event(_Event("/repo/__pycache__/x.pyc"))
     time.sleep(0.3)
     assert calls == []
+
+
+def test_store_writes_do_not_retrigger():
+    # the loop guard: a reindex writes into the index store, and watching it
+    # would re-trigger forever. Events under an ignore_path must be dropped.
+    calls = []
+    h = _DebouncedReindex(
+        lambda: calls.append(1), delay=0.15, ignore_paths=["/repo/store"]
+    )
+    h.on_any_event(_Event("/repo/store/lancedb/self.lance/data/x.lance"))
+    time.sleep(0.3)
+    assert calls == [], "writes under the store must not trigger a reindex"
+    # a real source edit outside the store still fires
+    h.on_any_event(_Event("/repo/app.py"))
+    time.sleep(0.3)
+    assert calls == [1]
 
 
 if __name__ == "__main__":

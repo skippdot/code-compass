@@ -110,9 +110,25 @@ def _iter_source_files(root: str) -> Iterator[tuple[str, str]]:
                 yield os.path.relpath(os.path.join(dirpath, filename), root), text
 
 
-def _file_hash(text: str) -> str:
-    # include the chunker version so logic changes invalidate reused chunks
-    return hashlib.sha1(f"v{CHUNKER_VERSION}\0{text}".encode()).hexdigest()
+def _embed_tag(embedder: Embedder) -> str:
+    """Stable identity of the embedding vector space.
+
+    Vectors from different models live in incomparable spaces, so this is mixed
+    into the per-file hash: switching CODE_COMPASS_EMBED (voyage <-> local)
+    invalidates every chunk and forces a clean re-embed, instead of the
+    incremental path silently reusing the previous model's vectors.
+    """
+    name = getattr(embedder, "model_name", None) or getattr(embedder, "model", None)
+    if not isinstance(name, str):
+        name = type(embedder).__name__
+    return f"{name}:{getattr(embedder, 'dim', '?')}"
+
+
+def _file_hash(text: str, embed_tag: str) -> str:
+    # chunker version + embedder identity both invalidate reused chunks
+    return hashlib.sha1(
+        f"v{CHUNKER_VERSION}\0{embed_tag}\0{text}".encode()
+    ).hexdigest()
 
 
 def index_repo(
@@ -129,6 +145,7 @@ def index_repo(
     repo_path = os.path.abspath(repo_path)
     table_name = table_name or os.path.basename(repo_path.rstrip("/"))
     embedder = embedder or make_embedder()
+    embed_tag = _embed_tag(embedder)  # part of the hash, so a backend switch reindexes
     db = lancedb.connect(DB_PATH)
 
     # load the previous index (if any), grouped by file, to reuse unchanged work
@@ -143,7 +160,7 @@ def index_repo(
     pending: list[tuple] = []  # (Chunk, file_hash) awaiting embedding
     reused_files = changed_files = 0
     for relpath, source in _iter_source_files(repo_path):
-        h = _file_hash(source)
+        h = _file_hash(source, embed_tag)
         if prev_hash.get(relpath) == h:
             reused_rows.extend(prev_rows[relpath])
             reused_files += 1

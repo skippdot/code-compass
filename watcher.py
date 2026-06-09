@@ -15,7 +15,14 @@ import time
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from indexer import index_repo
+from indexer import DB_PATH, index_repo
+
+# Path segments whose writes are noise, not source edits. The index store is the
+# critical one: a reindex writes into it, so watching it would re-trigger the
+# reindex forever (an infinite loop that, with the local model, exhausts RAM).
+_IGNORE_SEGMENTS = tuple(
+    os.sep + d + os.sep for d in (".git", "__pycache__", ".venv", "node_modules")
+)
 
 
 class _DebouncedReindex(FileSystemEventHandler):
@@ -23,17 +30,24 @@ class _DebouncedReindex(FileSystemEventHandler):
 
     `on_change` is injected (not hard-wired to index_repo) so the debounce
     logic can be tested without touching the filesystem or an embedder.
+    `ignore_paths` are absolute prefixes whose events are dropped (the store).
     """
 
-    def __init__(self, on_change, delay: float = 1.5):
+    def __init__(self, on_change, delay: float = 1.5, ignore_paths=()):
         self._on_change = on_change
         self._delay = delay
         self._timer: threading.Timer | None = None
         self._lock = threading.Lock()
+        self._ignore_paths = tuple(os.path.abspath(p) for p in ignore_paths)
+
+    def _ignored(self, path: str) -> bool:
+        if any(seg in path for seg in _IGNORE_SEGMENTS):
+            return True
+        ap = os.path.abspath(path)
+        return any(ap.startswith(p) for p in self._ignore_paths)
 
     def on_any_event(self, event):
-        # ignore directory events and git's own churn (.git writes constantly)
-        if event.is_directory or os.sep + ".git" + os.sep in event.src_path:
+        if event.is_directory or self._ignored(event.src_path):
             return
         with self._lock:
             if self._timer is not None:
@@ -59,7 +73,8 @@ def start_watch(repo_path: str, table_name: str | None = None) -> Observer:
         except Exception as exc:  # keep watching even if one run fails
             print(f"reindex failed: {exc}", file=sys.stderr)
 
-    handler = _DebouncedReindex(reindex)
+    # ignore the index store so reindex writes don't re-trigger us (loop guard)
+    handler = _DebouncedReindex(reindex, ignore_paths=[DB_PATH])
     observer = Observer()
     observer.schedule(handler, repo_path, recursive=True)
     observer.start()
